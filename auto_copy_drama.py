@@ -1,5 +1,5 @@
 """
-飞书漫剧素材自动复制脚本（应用身份认证 + 飞书机器人通知 + 环境变量）
+飞书漫剧素材自动复制脚本（应用身份认证 + 飞书机器人通知 + 环境变量 + 北京时间）
 ==============================================
 功能：将素材制作需求表（多维表格）中已完成的需求自动复制到个人剧目表格（电子表格）。
 筛选条件：
@@ -8,6 +8,8 @@
 通知：执行完成后通过飞书机器人发送结果通知
 
 认证方式：使用 Tenant Access Token（应用身份），需要将应用添加为源表和目标表的协作者。
+
+时区：强制使用北京时间（Asia/Shanghai），确保日期筛选和写入的时间与北京时间一致。
 
 使用前准备：
   1. 前往飞书开放平台 https://open.feishu.cn 创建企业自建应用
@@ -21,7 +23,7 @@
      - APP_ID
      - APP_SECRET
      - FEISHU_WEBHOOK
-  7. pip install requests
+  7. pip install requests pytz
   8. python auto_copy_drama.py
 """
 
@@ -31,6 +33,31 @@ import json
 import sys
 from datetime import datetime, date
 from typing import Optional, Union, List
+import pytz
+
+
+# =============================================================================
+#  时区设置（强制使用北京时间）
+# =============================================================================
+
+# 设置北京时区
+BEIJING_TZ = pytz.timezone('Asia/Shanghai')
+
+def get_beijing_now() -> datetime:
+    """获取当前北京时间（带时区信息的 datetime 对象）"""
+    return datetime.now(BEIJING_TZ)
+
+def get_beijing_today() -> date:
+    """获取当前北京时间的日期"""
+    return get_beijing_now().date()
+
+def get_beijing_time_str() -> str:
+    """获取当前北京时间字符串（格式：2026/07/08 14:30）"""
+    return get_beijing_now().strftime("%Y/%m/%d %H:%M")
+
+def get_beijing_date_str() -> str:
+    """获取当前北京时间日期字符串（格式：2026/07/08）"""
+    return get_beijing_now().strftime("%Y/%m/%d")
 
 
 # =============================================================================
@@ -129,7 +156,11 @@ def list_source_records(token: str) -> list:
 
 
 def convert_timestamp_to_date_with_time(value: Union[int, float, str]) -> Optional[str]:
-    """将时间戳转换为日期时间字符串（格式：2026/07/08 13:21）"""
+    """
+    将时间戳转换为日期时间字符串（包含日期和时间）
+    格式：2026/07/08 13:21
+    注意：时间戳本身是 UTC 时间，需要转换为北京时间显示
+    """
     if value is None:
         return None
     
@@ -143,18 +174,23 @@ def convert_timestamp_to_date_with_time(value: Union[int, float, str]) -> Option
     
     try:
         if value > 1000000000000:  # 13位毫秒时间戳
-            dt = datetime.fromtimestamp(value / 1000)
+            dt = datetime.fromtimestamp(value / 1000, tz=pytz.UTC)
         elif value > 1000000000:   # 10位秒时间戳
-            dt = datetime.fromtimestamp(value)
+            dt = datetime.fromtimestamp(value, tz=pytz.UTC)
         else:
             return str(value)
-        return dt.strftime("%Y/%m/%d %H:%M")
+        # 转换为北京时间
+        beijing_dt = dt.astimezone(BEIJING_TZ)
+        return beijing_dt.strftime("%Y/%m/%d %H:%M")
     except (ValueError, OSError):
         return str(value)
 
 
 def convert_timestamp_to_datetime(value: Union[int, float, str]) -> Optional[datetime]:
-    """将时间戳转换为 datetime 对象"""
+    """
+    将时间戳转换为 datetime 对象（北京时间）
+    用于日期比较
+    """
     if value is None:
         return None
     
@@ -168,11 +204,13 @@ def convert_timestamp_to_datetime(value: Union[int, float, str]) -> Optional[dat
     
     try:
         if value > 1000000000000:  # 13位毫秒时间戳
-            return datetime.fromtimestamp(value / 1000)
+            dt = datetime.fromtimestamp(value / 1000, tz=pytz.UTC)
         elif value > 1000000000:   # 10位秒时间戳
-            return datetime.fromtimestamp(value)
+            dt = datetime.fromtimestamp(value, tz=pytz.UTC)
         else:
             return None
+        # 转换为北京时间
+        return dt.astimezone(BEIJING_TZ)
     except (ValueError, OSError):
         return None
 
@@ -203,11 +241,11 @@ def get_field_raw_value(record: dict, field_name: str) -> Optional[Union[int, fl
 
 
 def is_today_timestamp(value: Union[int, float, str]) -> bool:
-    """判断时间戳是否属于今天"""
+    """判断时间戳是否属于今天（北京时间）"""
     dt = convert_timestamp_to_datetime(value)
     if dt is None:
         return False
-    return dt.date() == date.today()
+    return dt.date() == get_beijing_today()
 
 
 def is_valid_drama_type(drama_type: str) -> tuple:
@@ -226,9 +264,10 @@ def is_valid_drama_type(drama_type: str) -> tuple:
 def filter_pending_records(records: list) -> list:
     """筛选待处理的记录"""
     pending = []
-    today = date.today()
+    today = get_beijing_today()
     today_str = today.strftime("%Y/%m/%d")
     
+    print(f"  [北京时间] 当前日期: {today_str}")
     print(f"  筛选条件: 需求完成时间 = 今天 ({today_str})")
     print(f"  剧目类型: 仅限「漫剧」和「真人剧」（排除自剪）")
     
@@ -275,9 +314,9 @@ def sort_pending_records(pending_records: list) -> list:
             try:
                 ts = int(date_str)
                 if ts > 1000000000000:
-                    return datetime.fromtimestamp(ts / 1000)
+                    return datetime.fromtimestamp(ts / 1000, tz=pytz.UTC).astimezone(BEIJING_TZ)
                 elif ts > 1000000000:
-                    return datetime.fromtimestamp(ts)
+                    return datetime.fromtimestamp(ts, tz=pytz.UTC).astimezone(BEIJING_TZ)
             except (ValueError, OSError):
                 pass
         
@@ -419,9 +458,14 @@ def build_error_message(error_msg: str) -> str:
 # =============================================================================
 
 def main():
+    # 获取当前北京时间
+    now_beijing = get_beijing_now()
+    now_str = now_beijing.strftime("%Y/%m/%d %H:%M")
+    today_str = now_beijing.strftime("%Y/%m/%d")
+
     print("=" * 60)
-    print("  飞书漫剧素材自动复制脚本（应用身份认证 + 飞书通知）")
-    print(f"  运行时间: {datetime.now().strftime('%Y/%m/%d %H:%M')}")
+    print("  飞书漫剧素材自动复制脚本（应用身份认证 + 飞书通知 + 北京时间）")
+    print(f"  北京时间: {now_str}")
     print("  筛选条件:")
     print("    1. 只复制今天完成的需求")
     print("    2. 只复制「漫剧」和「真人剧」（排除自剪）")
@@ -471,7 +515,7 @@ def main():
             print("\n✅ 没有符合条件的记录需要复制，工作完成！")
             msg = (
                 f"✅ **今日无新需求**\n\n"
-                f"📅 {datetime.now().strftime('%Y/%m/%d')}\n"
+                f"📅 {today_str}（北京时间）\n"
                 "今天没有已完成且符合条件（漫剧/真人剧）的需求需要复制。"
             )
             send_feishu_message(FEISHU_WEBHOOK, msg)
@@ -481,8 +525,10 @@ def main():
         sorted_pending = sort_pending_records(pending)
 
         print("\n[5/5] 写入个人剧目表并更新源表...")
-        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
-        today_str = datetime.now().strftime("%Y/%m/%d")
+        # 使用北京时间
+        now_beijing = get_beijing_now()
+        now_str = now_beijing.strftime("%Y/%m/%d %H:%M")
+        today_str = now_beijing.strftime("%Y/%m/%d")
 
         manju_rows = []
         zhenren_rows = []
