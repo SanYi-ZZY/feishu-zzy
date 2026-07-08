@@ -11,10 +11,10 @@ jobs:
     
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4  # 从 v3 升级到 v4
+        uses: actions/checkout@v4
       
       - name: 设置 Python
-        uses: actions/setup-python@v5  # 从 v4 升级到 v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       
@@ -29,11 +29,3 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
           python auto_copy_drama.py
-      
-      - name: 上传执行日志（如果失败时保留日志）
-        if: failure()
-        uses: actions/upload-artifact@v4  # 保持 v4
-        with:
-          name: error-log
-          path: |
-            auto_copy_drama.log
