@@ -10,7 +10,7 @@ on:
   schedule:
     # 每小时执行一次（UTC 时间）
     # 对应北京时间也是每小时执行一次
-    - cron: '0 * * * *'
+    - cron: '0 1-16 * * *'
 
 jobs:
   run-script:
