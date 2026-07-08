@@ -1,9 +1,9 @@
 name: 自动复制飞书漫剧素材
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '50 1-16 * * *'
+   - cron: '*/5 * * * *' 
+
 
 jobs:
   run-script:
