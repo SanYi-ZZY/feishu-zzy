@@ -1,9 +1,16 @@
 name: 自动复制飞书漫剧素材
 
 on:
+  # 手动触发（方便测试）
   workflow_dispatch:
+  
+  # 定时触发：每小时执行一次
+  # 注意：GitHub Actions 使用 UTC 时间，北京时间 = UTC + 8 小时
+  # 这里配置的是 UTC 时间，实际执行时间需要 +8 小时
   schedule:
-    - cron: '0 * * * *'   # 每小时执行一次（UTC 时间）
+    # 每小时执行一次（UTC 时间）
+    # 对应北京时间也是每小时执行一次
+    - cron: '0 * * * *'
 
 jobs:
   run-script:
@@ -20,7 +27,7 @@ jobs:
       
       - name: 安装依赖
         run: |
-          pip install requests
+          pip install requests pytz
       
       - name: 执行脚本
         env:
