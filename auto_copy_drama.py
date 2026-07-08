@@ -17,7 +17,10 @@
   3. 发布应用并获取 App ID 和 App Secret
   4. 将应用添加为源多维表格和目标电子表格的协作者（可编辑权限）
   5. 在飞书群中创建自定义机器人，获取 Webhook 地址
-  6. 在 GitHub 仓库中设置 Secrets
+  6. 在 GitHub 仓库中设置 Secrets：
+     - APP_ID
+     - APP_SECRET
+     - FEISHU_WEBHOOK
   7. pip install requests
   8. python auto_copy_drama.py
 """
@@ -35,8 +38,8 @@ from typing import Optional, Union, List
 # =============================================================================
 
 # 飞书应用凭证（从环境变量读取）
-APP_ID = os.environ.get("APP_ID", "cli_aac77dbda9381cdc")
-APP_SECRET = os.environ.get("APP_SECRET", "fP5iK0pfc9UaBQ9H3lecpb1aoakYA1nV")
+APP_ID = os.environ.get("APP_ID", "")
+APP_SECRET = os.environ.get("APP_SECRET", "")
 
 # 飞书机器人 Webhook（从环境变量读取）
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK", "")
@@ -71,7 +74,7 @@ API_BASE = "https://open.feishu.cn/open-apis"
 def get_tenant_token(app_id: str, app_secret: str) -> str:
     """获取应用级别的 tenant_access_token"""
     url = f"{API_BASE}/auth/v3/tenant_access_token/internal"
-    resp = requests.post(url, json={"app_id": app_id, "app_secret": app_secret})
+    resp = requests.post(url, json={"app_id": app_id, "app_secret": app_secret}, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != 0:
@@ -83,7 +86,7 @@ def get_sheet_metadata(spreadsheet_token: str, token: str) -> dict:
     """获取电子表格的基本信息"""
     url = f"{API_BASE}/sheets/v3/spreadsheets/{spreadsheet_token}"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(url, headers=headers)
+    resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != 0:
@@ -110,7 +113,7 @@ def list_source_records(token: str) -> list:
     while True:
         if page_token:
             params["page_token"] = page_token
-        resp = requests.get(url, params=params, headers=headers)
+        resp = requests.get(url, params=params, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
@@ -146,7 +149,7 @@ def convert_timestamp_to_date_with_time(value: Union[int, float, str]) -> Option
         else:
             return str(value)
         return dt.strftime("%Y/%m/%d %H:%M")
-    except (ValueError, OSError) as e:
+    except (ValueError, OSError):
         return str(value)
 
 
@@ -323,7 +326,7 @@ def append_to_target_sheet(token: str, spreadsheet_token: str, sheet_id: str, ro
     }
     resp = requests.post(
         url, params={"insertDataOption": "INSERT_ROWS"},
-        headers=headers, json=body
+        headers=headers, json=body, timeout=30
     )
     resp.raise_for_status()
     data = resp.json()
@@ -339,19 +342,11 @@ def update_taken_time(token: str, record_id: str, timestamp: str) -> None:
     )
     headers = {"Authorization": f"Bearer {token}"}
     body = {"fields": {FIELD_TAKEN_TIME: timestamp}}
-    resp = requests.put(url, headers=headers, json=body)
+    resp = requests.put(url, headers=headers, json=body, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != 0:
         raise RuntimeError(f"更新记录 {record_id} 失败: {data}")
-
-
-def debug_record_fields(record: dict):
-    """调试：打印记录中的所有字段"""
-    fields = record.get("fields", {})
-    print("\n  [DEBUG] 记录中的所有字段:")
-    for key, value in fields.items():
-        print(f"    {key}: {value} (类型: {type(value).__name__})")
 
 
 # =============================================================================
@@ -411,7 +406,155 @@ def build_success_message(manju_count: int, zhenren_count: int, total: int,
 
 def build_error_message(error_msg: str) -> str:
     """构建错误通知消息"""
-    return f"""
-❌ **素材复制任务失败**
+    return (
+        "❌ **素材复制任务失败**\n\n"
+        "**错误信息**\n"
+        f"```\n{error_msg}\n```\n\n"
+        "请检查脚本配置或飞书权限。"
+    )
 
-**错误信息**
+
+# =============================================================================
+#  主函数
+# =============================================================================
+
+def main():
+    print("=" * 60)
+    print("  飞书漫剧素材自动复制脚本（应用身份认证 + 飞书通知）")
+    print(f"  运行时间: {datetime.now().strftime('%Y/%m/%d %H:%M')}")
+    print("  筛选条件:")
+    print("    1. 只复制今天完成的需求")
+    print("    2. 只复制「漫剧」和「真人剧」（排除自剪）")
+    print("=" * 60)
+
+    manju_count = 0
+    zhenren_count = 0
+    total_count = 0
+    success_count = 0
+    drama_list = []
+
+    try:
+        # 检查环境变量
+        if not APP_ID or not APP_SECRET:
+            error_msg = "请设置环境变量 APP_ID 和 APP_SECRET"
+            print(f"\n❌ {error_msg}")
+            send_feishu_message(FEISHU_WEBHOOK, build_error_message(error_msg))
+            sys.exit(1)
+
+        if not SPREADSHEET_TOKEN:
+            error_msg = "请填写 SPREADSHEET_TOKEN"
+            print(f"\n❌ {error_msg}")
+            send_feishu_message(FEISHU_WEBHOOK, build_error_message(error_msg))
+            return
+
+        print("\n[1/5] 获取应用访问凭证...")
+        token = get_tenant_token(APP_ID, APP_SECRET)
+        print("  Tenant Access Token 获取成功")
+
+        print("\n[2/5] 解析目标电子表格...")
+        sheets_map = get_sheet_metadata(SPREADSHEET_TOKEN, token)
+        print(f"  子表映射: {sheets_map}")
+
+        print("\n[3/5] 读取素材制作需求表...")
+        all_records = list_source_records(token)
+        
+        # 打印第一条记录用于调试（仅第一条）
+        if all_records:
+            fields = all_records[0].get("fields", {})
+            print("\n  [DEBUG] 第一条记录的字段:")
+            for key, value in list(fields.items())[:10]:
+                print(f"    {key}: {value}")
+        
+        pending = filter_pending_records(all_records)
+
+        if not pending:
+            print("\n✅ 没有符合条件的记录需要复制，工作完成！")
+            msg = (
+                f"✅ **今日无新需求**\n\n"
+                f"📅 {datetime.now().strftime('%Y/%m/%d')}\n"
+                "今天没有已完成且符合条件（漫剧/真人剧）的需求需要复制。"
+            )
+            send_feishu_message(FEISHU_WEBHOOK, msg)
+            return
+
+        print("\n[4/5] 按需求完成日期排序...")
+        sorted_pending = sort_pending_records(pending)
+
+        print("\n[5/5] 写入个人剧目表并更新源表...")
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+        today_str = datetime.now().strftime("%Y/%m/%d")
+
+        manju_rows = []
+        zhenren_rows = []
+        update_tasks = []
+
+        for item in sorted_pending:
+            r = item["record"]
+            complete_date = item["complete_date"]
+            drama_type = item["drama_type"]
+            drama_id   = get_field_value(r, FIELD_DRAMA_ID) or ""
+            drama_name = get_field_value(r, FIELD_DRAMA_NAME) or ""
+            record_id  = r.get("record_id", "")
+
+            row = [today_str, complete_date, drama_id, "", drama_name]
+
+            if drama_type == "漫剧":
+                manju_rows.append(row)
+                drama_list.append({"name": drama_name, "id": drama_id, "type": "漫剧"})
+                print(f"  漫剧 -> {drama_name} ({drama_id}) [完成日期: {complete_date}]")
+            elif drama_type == "真人剧":
+                zhenren_rows.append(row)
+                drama_list.append({"name": drama_name, "id": drama_id, "type": "真人剧"})
+                print(f"  真人剧 -> {drama_name} ({drama_id}) [完成日期: {complete_date}]")
+            else:
+                print(f"  跳过（类型未知）: {drama_name} (类型={drama_type})")
+                continue
+
+            update_tasks.append((record_id, now_str))
+
+        manju_count = len(manju_rows)
+        zhenren_count = len(zhenren_rows)
+        total_count = len(update_tasks)
+
+        if manju_rows:
+            append_to_target_sheet(token, SPREADSHEET_TOKEN, SHEET_MANJU, manju_rows)
+            print(f"  漫剧子表: +{manju_count} 行")
+        if zhenren_rows:
+            append_to_target_sheet(token, SPREADSHEET_TOKEN, SHEET_ZHENREN, zhenren_rows)
+            print(f"  真人剧子表: +{zhenren_count} 行")
+
+        print("\n  更新源表投手是否取走...")
+        success_count = 0
+        for record_id, ts in update_tasks:
+            try:
+                update_taken_time(token, record_id, ts)
+                print(f"    {record_id} -> {ts}")
+                success_count += 1
+            except Exception as e:
+                print(f"    {record_id} 失败: {e}")
+
+        print("\n" + "=" * 60)
+        print(f"  漫剧 {manju_count} 条 | 真人剧 {zhenren_count} 条")
+        print(f"  总计 {total_count} 条处理完成（今天完成 + 有效类型）")
+        print(f"  成功更新取走时间: {success_count}/{total_count}")
+        print("=" * 60)
+
+        # 发送成功通知
+        success_msg = build_success_message(
+            manju_count, zhenren_count, total_count,
+            success_count, total_count,
+            drama_list
+        )
+        send_feishu_message(FEISHU_WEBHOOK, success_msg)
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"\n❌ 脚本执行失败: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        send_feishu_message(FEISHU_WEBHOOK, build_error_message(error_msg))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
