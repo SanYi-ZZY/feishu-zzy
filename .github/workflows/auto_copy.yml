@@ -3,9 +3,9 @@ name: 自动复制飞书漫剧素材
 on:
   workflow_dispatch:
   schedule:
-    - cron: '7 9-23 * * *'
+    - cron: '24 9-23 * * *'
       timezone: 'Asia/Shanghai'
-    - cron: '7 0 * * *'
+    - cron: '24 0 * * *'
       timezone: 'Asia/Shanghai'
 
 jobs:
