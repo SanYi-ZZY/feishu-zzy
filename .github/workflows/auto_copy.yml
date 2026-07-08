@@ -3,8 +3,7 @@ name: 自动复制飞书漫剧素材
 on:
   workflow_dispatch:
   schedule:
-    # 每小时执行一次（在整点时刻）
-    - cron: '0 * * * *'
+    - cron: '0 * * * *'   # 每小时执行一次（UTC 时间）
 
 jobs:
   run-script:
