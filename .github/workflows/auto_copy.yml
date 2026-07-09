@@ -1,27 +1,27 @@
-# name: 自动复制飞书漫剧素材
+name: 自动复制飞书漫剧素材
 
-# on:
-#   schedule:
-#    - cron: '*/5 * * * *' 
+on:
+  schedule:
+   - cron: '*/5 * * * *' 
 
 
-# jobs:
-#   run-script:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: 检出代码
-#         uses: actions/checkout@v4
-#       - name: 设置 Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: '3.11'
-#       - name: 安装依赖
-#         run: |
-#           pip install requests pytz
-#       - name: 执行脚本
-#         env:
-#           APP_ID: ${{ secrets.APP_ID }}
-#           APP_SECRET: ${{ secrets.APP_SECRET }}
-#           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-#         run: |
-#           python auto_copy_drama.py
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: |
+          pip install requests pytz
+      - name: 执行脚本
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          python auto_copy_drama.py
